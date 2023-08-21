@@ -1,5 +1,8 @@
 ﻿using System;
-using System.IO;
+// using System.IO;
+// using System.Data;
+using System.Data.SqlClient;
+using System.Globalization;
 
 namespace dirTree
 {
@@ -8,103 +11,154 @@ namespace dirTree
         static System.Collections.Specialized.StringCollection log =
             new System.Collections.Specialized.StringCollection();
 
+        static long msgPost = 10001;
+        static string myEXT = "*.mp3";
+
+        static string myConnStr = @"Data source=LAPTOP-DAV6VLUB\SQLEXPRESS; Initial Catalog=ctest;Persist Security Info=True;Integrated Security=true;";
+        static SqlConnection conn = new SqlConnection(myConnStr);
+
+        static long countr = 0;
+        static long skipco = 0;
+        static long errco = 0;
+        static long fco = 0;
+        static DateTime thisDate = new DateTime();
+
         static void Main()
         {
-            Console.WriteLine("Press any key to START !!! ?");
-            Console.ReadKey();
-            FileInfo fi = new FileInfo(@"C:\Users\jfitz\Desktop\myCSV_333pm.txt");
-            FileStream fs = fi.Open(FileMode.OpenOrCreate, FileAccess.Write, FileShare.Read);
-            StreamWriter sw = new StreamWriter(fs);
+            Console.WriteLine("Starting");
+            /*
+            SimpleFileCopy sfc = new SimpleFileCopy();
+            sfc.myCopyFile(@"C:\Users\jfitz\source\repos", @"C:\Users\jfitz\source\repos\testSub2", "ctestA.txt", "ctestZ.txt");
+            return;
+            */
+            try
+            {
+                conn.Open();
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine("Exception while creating table:" + e.Message + "\t" + e.GetType());
+            }
 
-            string strToWrite = "Drive Letter , Length , Extention , Name , Creation Time , Last Write Time , Last Access Time , Directory Name ";
-            Console.WriteLine(strToWrite);
-
-            sw.WriteLine(strToWrite);
-
-            // Start with drives if you have to search the entire computer.
             string[] drives = System.Environment.GetLogicalDrives();
 
             foreach (string dr in drives)
             {
                 System.IO.DriveInfo di = new System.IO.DriveInfo(dr);
-
-                // Here we skip the drive if it is not ready to be read. This  C:\Users\jfitz\Desktop
-                // is not necessarily the appropriate action in all scenarios.
                 if (!di.IsReady)
                 {
                     Console.WriteLine("The drive {0} could not be read", di.Name);
                     continue;
                 }
                 System.IO.DirectoryInfo rootDir = di.RootDirectory;
-                WalkDirectoryTree(rootDir, sw);
+                WalkDirectoryTreeSQL(rootDir, 0);
             }
 
-            // Write out all the files that could not be processed.
             Console.WriteLine("Files with restricted access:");
             foreach (string s in log)
             {
                 Console.WriteLine(s);
             }
-            // Keep the console window open in debug mode.
-            Console.WriteLine("Press any key to finish");
+            Console.WriteLine("END... Files with restricted access.");
+
+            Console.WriteLine("Folder Countr: " + countr.ToString());
+            Console.WriteLine("Error Counted: " + errco.ToString());
+            Console.WriteLine("Files Skipped: " + skipco.ToString());
+            Console.WriteLine("Files Counted: " + fco.ToString());
+            Console.WriteLine("");
+            Console.WriteLine("Press any key to finish >");
             Console.ReadKey();
-            sw.Close();
+            conn.Close();
+
         }
 
-        static void WalkDirectoryTree(System.IO.DirectoryInfo root, StreamWriter swrit)
+
+        static void WalkDirectoryTreeSQL(System.IO.DirectoryInfo root, int lvlDeep)
         {
-            Console.WriteLine("WDT: " + root.FullName);
+            string sqlcmd;
+            SqlCommand cmd;
+            countr++;
+            if (countr % msgPost == 0)
+            {
+                Console.WriteLine("Folders Scanned : " + countr.ToString() + " --- " + root.FullName);
+            }
+
             System.IO.FileInfo[] files = null;
             System.IO.DirectoryInfo[] subDirs = null;
 
-            // First, process all the files directly under this folder
             try
             {
-                files = root.GetFiles("*.mp4");
+                files = root.GetFiles(myEXT);
             }
-            // This is thrown if even one of the files requires permissions greater
-            // than the application provides.
             catch (UnauthorizedAccessException e)
             {
-                // This code just writes out the message and continues to recurse.
-                // You may decide to do something different here. For example, you
-                // can try to elevate your privileges and access the file again.
-                log.Add(e.Message);
+                errco++;
+                //string sm1 = e.Message.Replace("'", "_");
+                //sqlcmd = "insert into mylog (logstr, log2, logdate) values ('" + sm1 + "' , 'UnAuth' , getdate())";
+                //cmd = new SqlCommand(sqlcmd, conn);
+                //cmd.ExecuteNonQuery();
+                // Console.WriteLine("UnAuth >>>>> " + sm1);
             }
 
-            catch (System.IO.DirectoryNotFoundException e)
+            catch (System.IO.DirectoryNotFoundException e2)
             {
-                Console.WriteLine(e.Message);
+                errco++;
+                string sm2 = e2.Message.Replace("'", "_");
+                sqlcmd = "insert into mylog (logstr, log2, logdate) values ('" + sm2 + "' , 'DirNotFound' , getdate())";
+                cmd = new SqlCommand(sqlcmd, conn);
+                cmd.ExecuteNonQuery();
             }
 
             if (files != null)
             {
+                CultureInfo cult = CultureInfo.GetCultureInfo("en-US");
                 foreach (System.IO.FileInfo fi in files)
                 {
-                    // In this example, we only access the existing FileInfo object. If we
-                    // want to open, delete or modify the file, then
-                    // a try-catch block is required here to handle the case
-                    // where the file has been deleted since the call to TraverseTree().
-                    string strToWrite = fi.DirectoryName.Substring(0, 2) + ", "
-                                      + fi.Length + ", "
-                                      + fi.Extension + ", "
-                                      + fi.Name + ", "
-                                      + fi.CreationTime + ", "
-                                      + fi.LastWriteTime + ", "
-                                      + fi.LastAccessTime + ", "
-                                      + fi.DirectoryName;
-
-                    swrit.WriteLine(strToWrite);
-                    Console.WriteLine(strToWrite);
+                    int ii = fi.Name.IndexOf("'");
+                    if (ii > 0)
+                    {
+                        skipco++;
+                        string newf = fi.Name.Replace("'", "_");
+                        string newd = fi.DirectoryName;
+                        sqlcmd = "insert into mylog (logstr, log2, logdate) values ('" + newf + "' , '" + newd + "' , getdate())";
+                        cmd = new SqlCommand(sqlcmd, conn);
+                        cmd.ExecuteNonQuery();
+                    }
+                    else
+                    {
+                        ii = fi.DirectoryName.IndexOf("'");
+                        if (ii > 0)
+                        {
+                            skipco++;
+                            string newf = fi.DirectoryName.Replace("'", "_");
+                            sqlcmd = "insert into mylog (logstr, log2, logdate) values ('" + newf + "' , 'Bad DirName' , getdate())";
+                            cmd = new SqlCommand(sqlcmd, conn);
+                            cmd.ExecuteNonQuery();
+                        }
+                        else
+                        {
+                            fco++;
+                            thisDate = DateTime.Now;
+                            sqlcmd = "insert into myfile (processDate, drv, fsize, dirname, fname, fexten, credate, wridate, accdate) values (";
+                            sqlcmd = sqlcmd + " '" + thisDate.ToString() + "' , ";
+                            sqlcmd = sqlcmd + " '" + fi.DirectoryName.Substring(0, 1) + "' , ";
+                            sqlcmd = sqlcmd + " "  + fi.Length.ToString() + " , ";
+                            sqlcmd = sqlcmd + " '" + fi.DirectoryName + "' , ";
+                            sqlcmd = sqlcmd + " '" + fi.Name + "' , ";
+                            sqlcmd = sqlcmd + " '" + fi.Extension + "' , ";
+                            sqlcmd = sqlcmd + " '" + fi.CreationTime.ToString("G", cult) + "' , ";
+                            sqlcmd = sqlcmd + " '" + fi.LastWriteTime.ToString("G", cult) + "' , ";
+                            sqlcmd = sqlcmd + " '" + fi.LastAccessTime.ToString("G", cult) + "')";
+                            cmd = new SqlCommand(sqlcmd, conn);
+                            cmd.ExecuteNonQuery();
+                        }
+                    }
                 }
 
-                // Now find all the subdirectories under this directory.
                 subDirs = root.GetDirectories();
-
                 foreach (System.IO.DirectoryInfo dirInfo in subDirs)
                 {
-                    // Resursive call for each subdirectory.
-                    WalkDirectoryTree(dirInfo, swrit);
+                    WalkDirectoryTreeSQL(dirInfo, lvlDeep + 1);
                 }
             }
         }
